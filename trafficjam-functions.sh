@@ -185,7 +185,6 @@ function get_network_subnet() {
 
 function get_whitelisted_container_ips() {
 	local CONTAINER_IDS
-	log_debug "Swarm Mode: $SWARM_MODE"
 	if ! CONTAINER_IDS=$(docker ps --filter "$WHITELIST_FILTER" --filter network="$NETWORK" --format="{{ .ID }}" 2>&1) || ([[ -z "$CONTAINER_IDS" ]] && [[ -z "$SWARM_MODE" ]]); then
 		log_error "Unexpected error while getting whitelist container IDs: $CONTAINER_IDS"
 		return 1

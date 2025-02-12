@@ -76,6 +76,10 @@ else
 	while true; do
 		tj_sleep
 
+		if [[ ! -z "$SWARM_MODE" ]]; then
+			log_debug "Running in swarm mode"
+		fi
+
 		get_network_driver || continue
 
 		get_network_subnet || continue
