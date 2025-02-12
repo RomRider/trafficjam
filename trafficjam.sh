@@ -21,7 +21,7 @@ fi
 : "${ALLOW_HOST_TRAFFIC:=}"
 : "${DEBUG:=}"
 : "${TZ:=}"
-: "${SWARM_MODE:=}"
+: "${SWARM_WORKER:=}"
 NETNS=""
 OLD_SUBNET=""
 OLD_WHITELIST_IPS=""
@@ -76,7 +76,7 @@ else
 	while true; do
 		tj_sleep
 
-		if [[ ! -z "$SWARM_MODE" ]]; then
+		if [[ ! -z "$SWARM_WORKER" ]]; then
 			log_debug "Running in swarm mode"
 		fi
 
@@ -99,7 +99,7 @@ else
 			"$LOCAL_LOAD_BALANCER_IP" != "$OLD_LOCAL_LOAD_BALANCER_IP" \
 		]]; then
 
-			if [[ ! -z "$SWARM_MODE" ]] && [[ -z "$WHITELIST_IPS" ]] && [[ -z "$LOCAL_LOAD_BALANCER_IP" ]]; then
+			if [[ ! -z "$SWARM_WORKER" ]] && [[ -z "$WHITELIST_IPS" ]] && [[ -z "$LOCAL_LOAD_BALANCER_IP" ]]; then
 				log_debug "No loadbalancer or container running on this node, skipping"
 			else
 				add_chain || continue
