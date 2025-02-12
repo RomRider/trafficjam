@@ -21,6 +21,7 @@ fi
 : "${ALLOW_HOST_TRAFFIC:=}"
 : "${DEBUG:=}"
 : "${TZ:=}"
+: "${SWARM_MODE:=}"
 NETNS=""
 OLD_SUBNET=""
 OLD_WHITELIST_IPS=""
@@ -75,7 +76,7 @@ else
 	while true; do
 		tj_sleep
 
-		get_network_driver || continue 
+		get_network_driver || continue
 
 		get_network_subnet || continue
 
@@ -94,27 +95,31 @@ else
 			"$LOCAL_LOAD_BALANCER_IP" != "$OLD_LOCAL_LOAD_BALANCER_IP" \
 		]]; then
 
-			add_chain || continue
+			if [[ ! -z "$SWARM_MODE" ]] && [[ -z "$WHITELIST_IPS" ]] && [[ -z "$LOCAL_LOAD_BALANCER_IP" ]]; then
+				log_debug "No loadbalancer or container running on this node, skipping"
+			else
+				add_chain || continue
 
-			block_subnet_traffic  || continue
+				block_subnet_traffic  || continue
 
-			if [[ -z "$ALLOW_HOST_TRAFFIC" ]]; then
-				add_input_chain || continue
-				block_host_traffic  || continue
-			fi
+				if [[ -z "$ALLOW_HOST_TRAFFIC" ]]; then
+					add_input_chain || continue
+					block_host_traffic  || continue
+				fi
 
-			if [[ "$NETWORK_DRIVER" == "overlay" ]]; then
-				report_local_whitelist_ips || continue		
-				allow_local_load_balancer_traffic || continue
-				allow_swarm_whitelist_traffic || continue
-			fi
+				if [[ "$NETWORK_DRIVER" == "overlay" ]]; then
+					report_local_whitelist_ips || continue
+					allow_local_load_balancer_traffic || continue
+					allow_swarm_whitelist_traffic || continue
+				fi
 
-			allow_local_whitelist_traffic || continue
+				allow_local_whitelist_traffic || continue
 
-			remove_old_rules TRAFFICJAM || continue
+				remove_old_rules TRAFFICJAM || continue
 
-			if [[ -z "$ALLOW_HOST_TRAFFIC" ]]; then
-				remove_old_rules TRAFFICJAM_INPUT || continue
+				if [[ -z "$ALLOW_HOST_TRAFFIC" ]]; then
+					remove_old_rules TRAFFICJAM_INPUT || continue
+				fi
 			fi
 
 			OLD_SUBNET="$SUBNET"

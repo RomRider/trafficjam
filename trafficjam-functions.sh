@@ -54,8 +54,8 @@ function clear_rules() {
 	fi
 
 	DATE=$(date "+%Y-%m-%d %H:%M:%S")
-	remove_old_rules TRAFFICJAM || true #this would normally fail if no rules exist but we don't want to exit 
-	remove_old_rules TRAFFICJAM_INPUT || true 
+	remove_old_rules TRAFFICJAM || true #this would normally fail if no rules exist but we don't want to exit
+	remove_old_rules TRAFFICJAM_INPUT || true
 
 	exit 0
 }
@@ -87,6 +87,7 @@ function deploy_service() {
 				--env NETWORK="$NETWORK" \
 				--env WHITELIST_FILTER="$WHITELIST_FILTER" \
 				--env DEBUG="$DEBUG" \
+				--env SWARM_MODE=true \
 				--cap-add NET_ADMIN \
 				--cap-add SYS_ADMIN \
 				--mode global \
@@ -100,7 +101,7 @@ function deploy_service() {
 		else
 			#docker service create may print warnings to stderr even if it succeeds
 			#particularly due to the trafficjam image not being accessible in a registry during CI
-			SERVICE_ID=$(printf '%s' "$SERVICE_ID" | tail -n1) 
+			SERVICE_ID=$(printf '%s' "$SERVICE_ID" | tail -n1)
 			log "Created service trafficjam_$INSTANCE_ID: $SERVICE_ID"
 		fi
 	else
@@ -184,18 +185,25 @@ function get_network_subnet() {
 
 function get_whitelisted_container_ips() {
 	local CONTAINER_IDS
-	if ! CONTAINER_IDS=$(docker ps --filter "$WHITELIST_FILTER" --filter network="$NETWORK" --format="{{ .ID }}" 2>&1) || [[ -z "$CONTAINER_IDS" ]]; then
+	log_debug "Swarm Mode: $SWARM_MODE"
+	if ! CONTAINER_IDS=$(docker ps --filter "$WHITELIST_FILTER" --filter network="$NETWORK" --format="{{ .ID }}" 2>&1) || ([[ -z "$CONTAINER_IDS" ]] && [[ -z "$SWARM_MODE" ]]); then
 		log_error "Unexpected error while getting whitelist container IDs: $CONTAINER_IDS"
 		return 1
 	fi
-	log_debug "Whitelisted containers: $CONTAINER_IDS"
 
-	if ! WHITELIST_IPS=$(xargs docker inspect --format="{{ (index .NetworkSettings.Networks \"$NETWORK\").IPAddress }}" <<< "$CONTAINER_IDS" 2>&1) || [[ -z "$WHITELIST_IPS" ]]; then
-		log_error "Unexpected error while getting whitelisted container IPs: ${WHITELIST_IPS}"
-		return 1
+	if [[ -z "$CONTAINER_IDS" ]] && [[ ! -z "$SWARM_MODE" ]]; then
+		log_debug "No whitelisted container found on this node"
+		WHITELIST_IPS=""
+	else
+		log_debug "Whitelisted containers: $CONTAINER_IDS"
+
+		if ! WHITELIST_IPS=$(xargs docker inspect --format="{{ (index .NetworkSettings.Networks \"$NETWORK\").IPAddress }}" <<< "$CONTAINER_IDS" 2>&1) || [[ -z "$WHITELIST_IPS" ]]; then
+			log_error "Unexpected error while getting whitelisted container IPs: ${WHITELIST_IPS}"
+			return 1
+		fi
+
+		log_debug "Whitelisted container IPs: $WHITELIST_IPS"
 	fi
-
-	log_debug "Whitelisted container IPs: $WHITELIST_IPS"
 }
 
 function get_netns() {
@@ -213,23 +221,31 @@ function get_netns() {
 		esac
 	done
 	if [[ -z "$NETNS" ]]; then
-		log_error "Could not retrieve network namespace for network ID $NETWORK_ID"
-		return 1
+		if ! [[ -z "SWARM_MODE" ]]; then
+			log_debug "No container on network $NETWORK on this node, skipping"
+		else
+			log_error "Could not retrieve network namespace for network ID $NETWORK_ID"
+			return 1
+		fi
 	else
 		log_debug "Network namespace of $NETWORK (ID: $NETWORK_ID) is $NETNS"
 	fi
 }
 
 function get_local_load_balancer_ip() {
-	if ! LOCAL_LOAD_BALANCER_IP=$(docker network inspect "$NETWORK" --format "{{ (index .Containers \"lb-$NETWORK\").IPv4Address  }}" | awk -F/ '{ print $1 }') || [ -z "$LOCAL_LOAD_BALANCER_IP" ]; then
+	if ! LOCAL_LOAD_BALANCER_IP=$(docker network inspect "$NETWORK" --format "{{ (index .Containers \"lb-$NETWORK\").IPv4Address  }}" | awk -F/ '{ print $1 }') || ([ -z "$LOCAL_LOAD_BALANCER_IP" ] && [[ -z "$SWARM_MODE" ]]); then
 		log_error "Could not retrieve load balancer IP for network $NETWORK"
 		return 1
 	fi
 
-	log_debug "Load balancer IP of $NETWORK is $LOCAL_LOAD_BALANCER_IP"
+	if [[ -z "$LOCAL_LOAD_BALANCER_IP" ]] && [[ ! -z "$SWARM_MODE" ]]; then
+		log_debug "No load balancer found on this node"
+	else
+		log_debug "Load balancer IP of $NETWORK is $LOCAL_LOAD_BALANCER_IP"
+	fi
 }
 
-function iptables_tj() {	
+function iptables_tj() {
 	if [[ "$NETWORK_DRIVER" == "overlay" ]]; then
 		nsenter --net="$NETNS" -- $IPTABLES_CMD "$@"
 	else
@@ -241,8 +257,15 @@ function add_chain() {
 	local RESULT
 	if ! iptables_tj --table filter --numeric --list TRAFFICJAM >& /dev/null; then
 		if ! RESULT=$(iptables_tj --new TRAFFICJAM 2>&1); then
-			log_error "Unexpected error while adding chain TRAFFICJAM: $RESULT"
-			return 1
+			if [[ -z "$SWARM_MODE" ]]; then
+				log_error "Unexpected error while adding chain TRAFFICJAM: $RESULT"
+				return 1
+			else
+				# Ugly workaround for nsenter: setns(): can't reassociate to namespace: Invalid argument
+				log_error "Unexpected error while adding chain TRAFFICJAM: $RESULT."
+				log_error "killing container to get access to the new network namespace (ugly workaround)"
+				kill 1
+			fi
 		else
 			log "Added chain: TRAFFICJAM"
 		fi
