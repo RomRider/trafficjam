@@ -185,12 +185,12 @@ function get_network_subnet() {
 
 function get_whitelisted_container_ips() {
 	local CONTAINER_IDS
-	if ! CONTAINER_IDS=$(docker ps --filter "$WHITELIST_FILTER" --filter network="$NETWORK" --format="{{ .ID }}" 2>&1) || ([[ -z "$CONTAINER_IDS" ]] && [[ -z "$SWARM_WORKER" ]]); then
+	if ! CONTAINER_IDS=$(docker ps --filter "$WHITELIST_FILTER" --filter network="$NETWORK" --format="{{ .ID }}" 2>&1) || { [[ -z "$CONTAINER_IDS" ]] && [[ -z "$SWARM_WORKER" ]]; }; then
 		log_error "Unexpected error while getting whitelist container IDs: $CONTAINER_IDS"
 		return 1
 	fi
 
-	if [[ -z "$CONTAINER_IDS" ]] && [[ ! -z "$SWARM_WORKER" ]]; then
+	if [[ -z "$CONTAINER_IDS" ]] && [[ -n "$SWARM_WORKER" ]]; then
 		log_debug "No whitelisted container found on this node"
 		WHITELIST_IPS=""
 	else
@@ -220,7 +220,7 @@ function get_netns() {
 		esac
 	done
 	if [[ -z "$NETNS" ]]; then
-		if [[ ! -z "$SWARM_WORKER" ]]; then
+		if [[ -n "$SWARM_WORKER" ]]; then
 			log_debug "No container on network $NETWORK on this node, skipping"
 		else
 			log_error "Could not retrieve network namespace for network ID $NETWORK_ID"
@@ -232,12 +232,12 @@ function get_netns() {
 }
 
 function get_local_load_balancer_ip() {
-	if ! LOCAL_LOAD_BALANCER_IP=$(docker network inspect "$NETWORK" --format "{{ (index .Containers \"lb-$NETWORK\").IPv4Address  }}" | awk -F/ '{ print $1 }') || ([ -z "$LOCAL_LOAD_BALANCER_IP" ] && [[ -z "$SWARM_WORKER" ]]); then
+	if ! LOCAL_LOAD_BALANCER_IP=$(docker network inspect "$NETWORK" --format "{{ (index .Containers \"lb-$NETWORK\").IPv4Address  }}" | awk -F/ '{ print $1 }') || { [ -z "$LOCAL_LOAD_BALANCER_IP" ] && [[ -z "$SWARM_WORKER" ]]; }; then
 		log_error "Could not retrieve load balancer IP for network $NETWORK"
 		return 1
 	fi
 
-	if [[ -z "$LOCAL_LOAD_BALANCER_IP" ]] && [[ ! -z "$SWARM_WORKER" ]]; then
+	if [[ -z "$LOCAL_LOAD_BALANCER_IP" ]] && [[ -n "$SWARM_WORKER" ]]; then
 		log_debug "No load balancer found on this node"
 	else
 		log_debug "Load balancer IP of $NETWORK is $LOCAL_LOAD_BALANCER_IP"
